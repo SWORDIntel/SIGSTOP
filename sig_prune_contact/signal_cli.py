@@ -265,3 +265,35 @@ class SignalCli:
             return self._run_signal_cli("--version")
         except SignalCliError:
             return "unknown"
+
+    def is_authenticated(self) -> bool:
+        """Check if signal-cli is authenticated and configured.
+
+        Returns:
+            True if authenticated and has contacts, False otherwise
+        """
+        try:
+            contacts = self.list_contacts()
+            return len(contacts) > 0
+        except SignalCliError:
+            return False
+
+    def get_account_info(self) -> Optional[Dict[str, str]]:
+        """Get registered account information.
+
+        Returns:
+            Dict with account details or None if not authenticated
+        """
+        try:
+            # Try to get version and verify auth by listing contacts
+            version = self.get_version()
+            has_contacts = self.is_authenticated()
+
+            return {
+                "version": version,
+                "authenticated": str(has_contacts),
+                "config_path": str(self.config_path)
+            }
+        except Exception as e:
+            logger.debug(f"Could not retrieve account info: {e}")
+            return None

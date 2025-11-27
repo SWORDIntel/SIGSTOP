@@ -84,9 +84,22 @@ from .utils import parse_contact_argument, expand_export_path, validate_formats,
     default=None,
     help="Write structured logs to file."
 )
+@click.option(
+    "--show-logs",
+    is_flag=True,
+    default=False,
+    help="Display all logs at the end of execution."
+)
+@click.option(
+    "--check-auth",
+    is_flag=True,
+    default=False,
+    help="Check authentication status and exit."
+)
 def main(contact: Optional[str], export_dir: str, format: str, attachments: bool,
          delete: bool, require_backup_check: bool, dry_run: bool, force: bool,
-         leave_groups: bool, verbose: bool, log_file: Optional[str]):
+         leave_groups: bool, verbose: bool, log_file: Optional[str], show_logs: bool,
+         check_auth: bool):
     """sig-prune-contact: Interactive Signal contact pruning and export tool."""
 
     console = Console()
@@ -107,6 +120,11 @@ def main(contact: Optional[str], export_dir: str, format: str, attachments: bool
         logger_module.logger = StructuredLogger(verbose=verbose)
 
     try:
+        # Handle authentication check mode
+        if check_auth:
+            exit_code = _check_authentication(console)
+            sys.exit(exit_code)
+
         exit_code = _run_workflow(
             console=console,
             contact_arg=contact,
@@ -118,23 +136,111 @@ def main(contact: Optional[str], export_dir: str, format: str, attachments: bool
             dry_run=dry_run,
             skip_confirmations=force,
             leave_groups=leave_groups,
-            verbose=verbose
+            verbose=verbose,
+            show_logs=show_logs
         )
+
+        # Display logs if requested
+        if show_logs:
+            _display_logs(console)
+
         sys.exit(exit_code)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")
+        if show_logs:
+            _display_logs(console)
         sys.exit(1)
     except Exception as e:
         console.print(f"[red]Unexpected error: {e}[/red]", style="bold")
         logger.error(f"Unexpected error: {e}")
+        if show_logs:
+            _display_logs(console)
         sys.exit(1)
+
+
+def _check_authentication(console: Console) -> int:
+    """Check if signal-cli is authenticated and configured.
+
+    Returns:
+        Exit code: 0 if authenticated, 1 if not
+    """
+    console.print("[bold cyan]Checking Signal authentication status...[/bold cyan]\n")
+
+    try:
+        signal_cli = SignalCli()
+        account_info = signal_cli.get_account_info()
+
+        if account_info:
+            console.print(Panel(
+                f"[green]✓ Authentication Status: OK[/green]\n"
+                f"signal-cli version: {account_info.get('version')}\n"
+                f"Authenticated: {account_info.get('authenticated')}\n"
+                f"Config path: {account_info.get('config_path')}",
+                title="[bold]Authentication Check[/bold]"
+            ))
+            return 0
+        else:
+            console.print(Panel(
+                "[red]✗ Not authenticated[/red]\n"
+                "Please run: signal-cli link\n"
+                "Or ensure signal-cli is properly configured.",
+                title="[bold red]Authentication Required[/bold red]"
+            ))
+            return 1
+
+    except SignalCliError as e:
+        console.print(Panel(
+            f"[red]✗ Error checking authentication[/red]\n{e}",
+            title="[bold red]Authentication Check Failed[/bold red]"
+        ))
+        logger.error(f"Authentication check failed: {e}")
+        return 1
+
+
+def _display_logs(console: Console):
+    """Display all collected logs in a formatted table."""
+    from rich.table import Table
+
+    logs = logger.get_logs()
+
+    if not logs:
+        console.print("[yellow]No logs collected.[/yellow]")
+        return
+
+    console.print("\n")
+    table = Table(title="Execution Logs", show_header=True, header_style="bold magenta")
+    table.add_column("Level", style="cyan", width=8)
+    table.add_column("Timestamp", style="green", width=26)
+    table.add_column("Message", style="white")
+
+    for log_entry in logs:
+        level = log_entry.get("level", "INFO")
+        timestamp = log_entry.get("timestamp", "")
+        message = log_entry.get("message", "")
+
+        # Color code by level
+        level_style = {
+            "DEBUG": "dim",
+            "INFO": "cyan",
+            "WARNING": "yellow",
+            "ERROR": "red"
+        }.get(level, "white")
+
+        table.add_row(
+            f"[{level_style}]{level}[/{level_style}]",
+            timestamp,
+            message
+        )
+
+    console.print(table)
+    console.print(f"\n[cyan]Total log entries: {len(logs)}[/cyan]")
 
 
 def _run_workflow(console: Console, contact_arg: Optional[str], export_dir: str,
                  formats: str, include_attachments: bool, enable_deletion: bool,
                  require_backup_check: bool, dry_run: bool, skip_confirmations: bool,
-                 leave_groups: bool, verbose: bool) -> int:
+                 leave_groups: bool, verbose: bool, show_logs: bool = False) -> int:
     """Run the main workflow.
 
     Returns:
@@ -146,6 +252,18 @@ def _run_workflow(console: Console, contact_arg: Optional[str], export_dir: str,
         signal_cli = SignalCli()
         signal_cli_version = signal_cli.get_version()
         logger.info(f"Using signal-cli version: {signal_cli_version}")
+
+        # Verify authentication
+        if not signal_cli.is_authenticated():
+            console.print(Panel(
+                "[red]✗ Not authenticated with Signal[/red]\n"
+                "Please run: signal-cli link\n"
+                "And ensure your phone number is registered.",
+                title="[bold red]Authentication Required[/bold red]"
+            ))
+            logger.error("signal-cli is not authenticated")
+            return 1
+
     except SignalCliError as e:
         console.print(f"[red]Error: {e}[/red]")
         logger.error(f"Failed to initialize signal-cli: {e}")

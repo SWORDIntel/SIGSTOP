@@ -42,18 +42,48 @@ Interactive Signal contact pruning and export tool for selectively exporting and
 ### Requirements
 - Python 3.8+
 - `signal-cli` installed and configured
+- Active Signal account with phone number registered
 
 ### Setup
+
+#### 1. Install signal-cli
 ```bash
-# Clone repository
-git clone <repo-url>
-cd SIGSTOP
+# Option A: Using snap (recommended)
+snap install signal-cli
 
-# Install dependencies
+# Option B: Using package manager
+apt install signal-cli  # Ubuntu/Debian
+brew install signal-cli  # macOS
+```
+
+#### 2. Authenticate with Signal
+```bash
+# This will display a QR code to scan with your Signal app
+signal-cli link
+
+# After scanning, your phone number will be registered
+signal-cli receive  # Test that it works
+```
+
+#### 3. Install sig-prune-contact
+```bash
+cd /path/to/SIGSTOP
 pip install -e .
-
-# Or install from requirements
 pip install -r requirements.txt
+```
+
+#### 4. Verify Setup
+```bash
+# Check that everything is configured correctly
+sig-prune-contact --check-auth
+```
+
+Expected output if authenticated:
+```
+✓ Authentication Status: OK
+signal-cli version: 0.x.x
+Authenticated: True
+Config path: /home/user/.local/share/signal-cli
 ```
 
 ## Usage
@@ -101,6 +131,45 @@ sig-prune-contact \
   --force
 ```
 
+### Check authentication status
+```bash
+sig-prune-contact --check-auth
+```
+
+This verifies that `signal-cli` is properly configured and authenticated. Output:
+```
+✓ Authentication Status: OK
+signal-cli version: 0.x.x
+Authenticated: True
+Config path: /home/user/.local/share/signal-cli
+```
+
+### View all execution logs
+```bash
+sig-prune-contact \
+  --contact "+15551234567" \
+  --show-logs
+```
+
+Displays a formatted table of all logs at the end with timestamps and severity levels.
+
+### Combined: Full export with log output
+```bash
+sig-prune-contact \
+  --contact "+15551234567" \
+  --format "json,md,html" \
+  --attachments \
+  --log-file "~/export.log" \
+  --show-logs \
+  --verbose
+```
+
+This will:
+1. Export conversation in all formats
+2. Write JSON logs to file
+3. Display formatted log table at end
+4. Include debug-level messages
+
 ## CLI Reference
 
 ### Flags
@@ -118,6 +187,8 @@ sig-prune-contact \
 | `--leave-groups` | Also leave shared groups | Off |
 | `--verbose` | Enable debug logging | Off |
 | `--log-file <path>` | Write structured logs to file | None |
+| `--show-logs` | Display all collected logs at end of execution | Off |
+| `--check-auth` | Check authentication status and exit | Off |
 
 ## Exit Codes
 
@@ -301,12 +372,35 @@ sig-prune-contact \
 
 ## Troubleshooting
 
+### "Not authenticated with Signal"
+This means `signal-cli` hasn't been set up yet. Follow these steps:
+
+```bash
+# 1. Check current status
+sig-prune-contact --check-auth
+
+# 2. If not authenticated, register with Signal
+signal-cli link
+# This will display a QR code to scan with your Signal app
+
+# 3. Verify it worked
+signal-cli receive
+
+# 4. Re-check authentication
+sig-prune-contact --check-auth
+```
+
 ### "signal-cli not found"
 Install signal-cli:
 ```bash
 snap install signal-cli
 # or
 apt install signal-cli  # (if available in your distro)
+```
+
+Then register your phone number:
+```bash
+signal-cli link
 ```
 
 ### "No Signal backup found"
@@ -318,13 +412,29 @@ sig-prune-contact \
   --force
 ```
 
-### "Export failed"
+### "Export failed" or "Can't list contacts"
 Check logs with verbose mode:
 ```bash
 sig-prune-contact \
   --contact "+15551234567" \
   --verbose \
+  --show-logs \
   --dry-run
+```
+
+The `--show-logs` flag will display all collected logs in a formatted table, helping you identify the exact issue.
+
+### Viewing detailed logs
+For complete audit trail:
+```bash
+# Display logs on screen
+sig-prune-contact \
+  --contact "+15551234567" \
+  --show-logs \
+  --log-file "debug.log"
+
+# View the JSON log file
+cat debug.log | jq .  # Pretty-print JSON logs
 ```
 
 ## Contributing

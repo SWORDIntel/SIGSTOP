@@ -8,6 +8,9 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn
+from rich.live import Live
+from rich.layout import Layout
 import json
 
 from .logger import logger
@@ -242,15 +245,73 @@ class DeletionConfirmation:
             )
 
 
+class OperationStatus:
+    """Display real-time operation status with spinner."""
+
+    def __init__(self, console: Optional[Console] = None):
+        """Initialize status display."""
+        self.console = console or Console()
+        self.progress = None
+
+    def start_operation(self, operation: str):
+        """Start an operation with spinner."""
+        self.progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console
+        )
+        self.progress.start()
+        self.task_id = self.progress.add_task(operation, total=None)
+
+    def update_operation(self, status: str):
+        """Update operation status."""
+        if self.progress:
+            self.progress.update(self.task_id, description=status)
+
+    def complete_operation(self, success: bool = True):
+        """Complete operation and show result."""
+        if self.progress:
+            symbol = "[green]✓[/green]" if success else "[red]✗[/red]"
+            desc = self.progress._tasks[self.task_id].description
+            self.progress.stop()
+            self.console.print(f"{symbol} {desc}")
+            self.progress = None
+
+
 class ProgressDisplay:
-    """Display progress during export/deletion."""
+    """Display progress during export/deletion with progress bars."""
 
     def __init__(self, console: Optional[Console] = None):
         """Initialize progress display."""
         self.console = console or Console()
+        self.progress = None
+
+    def start_progress(self, total: int, description: str = "Processing"):
+        """Start a progress bar."""
+        self.progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            console=self.console
+        )
+        self.progress.start()
+        self.task_id = self.progress.add_task(description, total=total)
+
+    def update_progress(self, advance: int = 1):
+        """Advance progress bar."""
+        if self.progress:
+            self.progress.update(self.task_id, advance=advance)
+
+    def finish_progress(self, success: bool = True):
+        """Finish progress bar."""
+        if self.progress:
+            self.progress.stop()
+            self.progress = None
 
     def show_export_progress(self, current: int, total: int, phase: str):
-        """Show export progress."""
+        """Show export progress in simple format."""
         percent = (current / total * 100) if total > 0 else 0
         self.console.print(
             f"[cyan]{phase}:[/cyan] {current}/{total} ({percent:.1f}%)"
@@ -278,3 +339,70 @@ class ManifestDisplay:
             syntax,
             title="[bold]Export Manifest[/bold]"
         ))
+
+    def display_summary(self, manifest: Dict[str, Any]):
+        """Display manifest summary in human-readable format."""
+        contact = manifest.get("contact", {})
+        stats = manifest.get("statistics", {})
+        config = manifest.get("export_config", {})
+
+        summary_lines = [
+            f"[bold cyan]Contact:[/bold cyan] {contact.get('name')} ({contact.get('number')})",
+            f"[bold cyan]Messages:[/bold cyan] {stats.get('message_count', 0)}",
+            f"[bold cyan]Attachments:[/bold cyan] {stats.get('attachment_count', 0)}",
+            f"[bold cyan]Date Range:[/bold cyan] {stats.get('date_range', {}).get('start', 'N/A')} to {stats.get('date_range', {}).get('end', 'N/A')}",
+            f"[bold cyan]Formats:[/bold cyan] {', '.join(config.get('formats', []))}",
+            f"[bold cyan]Export Date:[/bold cyan] {manifest.get('export_date', 'N/A')}",
+        ]
+
+        self.console.print(Panel(
+            "\n".join(summary_lines),
+            title="[bold green]✓ Export Summary[/bold green]",
+            border_style="green"
+        ))
+
+
+class SummaryDisplay:
+    """Display operation summary and statistics."""
+
+    def __init__(self, console: Optional[Console] = None):
+        """Initialize summary display."""
+        self.console = console or Console()
+
+    def show_operation_summary(self, operation_type: str, contact_name: str,
+                              message_count: int, duration_seconds: float,
+                              success: bool = True):
+        """Display summary of completed operation."""
+        status_color = "green" if success else "red"
+        status_icon = "✓" if success else "✗"
+        status_text = "Completed Successfully" if success else "Failed"
+
+        summary_data = {
+            "Status": f"[{status_color}]{status_icon} {status_text}[/{status_color}]",
+            "Operation": operation_type,
+            "Contact": contact_name,
+            "Messages Processed": f"{message_count:,}",
+            "Duration": f"{duration_seconds:.2f}s",
+            "Speed": f"{message_count / duration_seconds:.0f} msg/s" if duration_seconds > 0 else "N/A"
+        }
+
+        summary_lines = [
+            f"[bold]{k}:[/bold] {v}" for k, v in summary_data.items()
+        ]
+
+        self.console.print(Panel(
+            "\n".join(summary_lines),
+            title=f"[bold]{operation_type} Summary[/bold]",
+            border_style=status_color
+        ))
+
+    def show_statistics_table(self, stats: Dict[str, Any]):
+        """Display statistics in table format."""
+        table = Table(title="Operation Statistics", show_header=True, header_style="bold magenta")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green", justify="right")
+
+        for key, value in stats.items():
+            table.add_row(key, str(value))
+
+        self.console.print(table)
